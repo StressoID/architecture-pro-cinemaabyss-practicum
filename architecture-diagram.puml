@@ -1,0 +1,43 @@
+@startuml CinemaAbyss To-Be Architecture - Container Diagram
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Container.puml
+
+LAYOUT_WITH_LEGEND()
+
+title Container Diagram - CinemaAbyss To-Be Architecture
+
+Person(user, "Пользователь", "Клиент сервиса Кинобездна")
+
+System_Boundary(cinemaabyss, "Система Кинобездна") {
+    Container(proxy, "Proxy Service", "Go, HTTP", "API Gateway с паттерном Strangler Fig. Маршрутизация запросов между монолитом и микросервисами")
+    
+    Container(monolith, "Monolith Service", "Go, HTTP, PostgreSQL", "Монолитное приложение. Обрабатывает пользователей, платежи, подписки. В процессе миграции")
+    
+    Container(movies, "Movies Service", "Go, HTTP, PostgreSQL", "Микросервис метаданных о фильмах. Обрабатывает фильмы, жанры, рейтинги")
+    
+    Container(events, "Events Service", "Go, HTTP, Kafka", "Микросервис событий. Публикует и обрабатывает события через Kafka")
+    
+    ContainerDb(postgres, "PostgreSQL", "PostgreSQL 14", "База данных для монолита и movies-сервиса")
+    
+    ContainerQueue(kafka, "Kafka", "Apache Kafka", "Брокер сообщений для событийной архитектуры")
+}
+
+System_Ext(recommendation, "Рекомендательная система", "Внешняя система рекомендаций")
+
+Rel(user, proxy, "Использует", "HTTPS")
+Rel(proxy, monolith, "Проксирует запросы", "HTTP")
+Rel(proxy, movies, "Проксирует запросы /api/movies", "HTTP (с процентным распределением)")
+Rel(proxy, events, "Проксирует запросы /api/events", "HTTP")
+
+Rel(monolith, postgres, "Читает/Записывает", "SQL")
+Rel(movies, postgres, "Читает/Записывает", "SQL")
+
+Rel(events, kafka, "Публикует события", "Kafka Protocol")
+Rel(events, kafka, "Читает события", "Kafka Protocol")
+
+Rel(monolith, recommendation, "Получает рекомендации", "HTTP/HTTPS")
+
+SHOW_LEGEND()
+
+@enduml
+
+
