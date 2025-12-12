@@ -2,18 +2,19 @@ name: Build and Push Docker Images
 
 on:
   push:
-    branches: [ main ]
-    paths:
-      - 'src/**'
-      - '.github/workflows/docker-build-push.yml'
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
   release:
     types: [published]
+  workflow_dispatch:
 
 env:
   REGISTRY: ghcr.io
 
 jobs:
   build-and-push:
+    name: Build and Push Docker Images
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -27,6 +28,12 @@ jobs:
             dockerfile: Dockerfile
           - name: events-service
             context: ./src/microservices/events
+            dockerfile: Dockerfile
+          - name: movies-service
+            context: ./src/microservices/movies
+            dockerfile: Dockerfile
+          - name: monolith
+            context: ./src/monolith
             dockerfile: Dockerfile
 
     steps:
@@ -66,6 +73,30 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+      - name: Make package public
+        run: |
+          # Try different package name formats
+          PACKAGE_NAME1="${{ matrix.service.name }}"
+          PACKAGE_NAME2="${{ github.repository_owner }}/${{ matrix.service.name }}"
+          PACKAGE_NAME3="${{ github.repository_owner }}/${{ github.event.repository.name }}/${{ matrix.service.name }}"
+          
+          for PACKAGE_NAME in "$PACKAGE_NAME1" "$PACKAGE_NAME2" "$PACKAGE_NAME3"; do
+            echo "Trying to make package $PACKAGE_NAME public"
+            RESPONSE=$(curl -s -w "\n%{http_code}" -X PATCH \
+              -H "Accept: application/vnd.github+json" \
+              -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
+              -H "X-GitHub-Api-Version: 2022-11-28" \
+              https://api.github.com/user/packages/container/$PACKAGE_NAME \
+              -d '{"visibility":"public"}')
+            HTTP_CODE=$(echo "$RESPONSE" | tail -n1)
+            if [ "$HTTP_CODE" = "204" ] || [ "$HTTP_CODE" = "200" ]; then
+              echo "Successfully made package $PACKAGE_NAME public"
+              break
+            else
+              echo "Failed with HTTP code $HTTP_CODE for $PACKAGE_NAME"
+            fi
+          done
 
   api-tests:
     runs-on: ubuntu-latest
@@ -107,3 +138,180 @@ jobs:
         if: always()
         run: |
           docker-compose down -v
+
+  kubernetes-tests:
+    runs-on: ubuntu-latest
+    needs: build-and-push
+    if: github.ref == 'refs/heads/main'
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      - name: Set up kubectl
+        uses: azure/setup-kubectl@v3
+        with:
+          version: 'latest'
+
+      - name: Set up kind
+        uses: helm/kind-action@v1.8.0
+        with:
+          version: 'v0.20.0'
+
+      - name: Create kind cluster
+        run: |
+          kind create cluster --wait 5m
+
+      - name: Install ingress-nginx
+        run: |
+          kubectl apply -f https://raw.githubusercontent.com/kubernetes/ingress-nginx/main/deploy/static/provider/kind/deploy.yaml
+          kubectl wait --namespace ingress-nginx \
+            --for=condition=ready pod \
+            --selector=app.kubernetes.io/component=controller \
+            --timeout=300s
+
+      - name: Create namespace
+        run: |
+          kubectl apply -f src/kubernetes/namespace.yaml
+
+      - name: Apply configmaps and secrets
+        run: |
+          kubectl apply -f src/kubernetes/configmap.yaml
+          kubectl apply -f src/kubernetes/secret.yaml
+          # Remove imagePullSecrets from deployments since images are now public
+          kubectl apply -f src/kubernetes/postgres-init-configmap.yaml
+
+      - name: Deploy PostgreSQL
+        run: |
+          kubectl apply -f src/kubernetes/postgres.yaml
+          kubectl wait --namespace cinemaabyss \
+            --for=condition=ready pod \
+            --selector=app=postgres \
+            --timeout=300s
+
+      - name: Deploy Kafka
+        run: |
+          kubectl apply -f src/kubernetes/kafka/kafka.yaml
+          kubectl wait --namespace cinemaabyss \
+            --for=condition=ready pod \
+            --selector=app=kafka \
+            --timeout=300s
+
+      - name: Deploy services
+        run: |
+          kubectl apply -f src/kubernetes/monolith.yaml
+          kubectl apply -f src/kubernetes/movies-service.yaml
+          kubectl apply -f src/kubernetes/events-service.yaml
+          kubectl apply -f src/kubernetes/proxy-service.yaml
+
+      - name: Wait for services to be ready
+        run: |
+          kubectl wait --namespace cinemaabyss \
+            --for=condition=ready pod \
+            --selector=app=monolith \
+            --timeout=300s
+          kubectl wait --namespace cinemaabyss \
+            --for=condition=ready pod \
+            --selector=app=movies-service \
+            --timeout=300s
+          kubectl wait --namespace cinemaabyss \
+            --for=condition=ready pod \
+            --selector=app=events-service \
+            --timeout=300s
+          kubectl wait --namespace cinemaabyss \
+            --for=condition=ready pod \
+            --selector=app=proxy-service \
+            --timeout=300s
+
+      - name: Apply ingress
+        run: |
+          kubectl apply -f src/kubernetes/ingress.yaml
+
+      - name: Wait for ingress to be ready
+        run: |
+          sleep 10
+          kubectl wait --namespace ingress-nginx \
+            --for=condition=ready pod \
+            --selector=app.kubernetes.io/component=controller \
+            --timeout=300s
+
+      - name: Install Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: '18'
+
+      - name: Install test dependencies
+        run: |
+          cd tests/postman
+          npm install
+
+      - name: Setup port-forward and run tests
+        run: |
+          # Start port-forward in background
+          kubectl port-forward -n cinemaabyss service/proxy-service 8000:80 &
+          PF_PID=$!
+          sleep 5
+          
+          # Update environment file with localhost URLs
+          cd tests/postman
+          cat > kubernetes.environment.json <<EOF
+          {
+            "id": "kubernetes-env",
+            "name": "Kubernetes Environment",
+            "values": [
+              {
+                "key": "baseUrl",
+                "value": "http://localhost:8000",
+                "type": "default",
+                "enabled": true
+              },
+              {
+                "key": "moviesServiceUrl",
+                "value": "http://localhost:8000",
+                "type": "default",
+                "enabled": true
+              },
+              {
+                "key": "eventsServiceUrl",
+                "value": "http://localhost:8000",
+                "type": "default",
+                "enabled": true
+              },
+              {
+                "key": "proxyServiceUrl",
+                "value": "http://localhost:8000",
+                "type": "default",
+                "enabled": true
+              }
+            ],
+            "_postman_variable_scope": "environment"
+          }
+          EOF
+          
+          # Wait for services to be healthy
+          echo "Waiting for proxy service to be ready..."
+          for i in {1..60}; do
+            if curl -f http://localhost:8000/health 2>/dev/null; then
+              echo "Proxy service is ready"
+              break
+            fi
+            if [ $i -eq 60 ]; then
+              echo "Proxy service failed to become ready"
+              kubectl get pods -n cinemaabyss
+              kubectl logs -n cinemaabyss -l app=proxy-service --tail=50
+              exit 1
+            fi
+            sleep 2
+          done
+          
+          # Run tests
+          TEST_EXIT=0
+          npm run test:kubernetes || TEST_EXIT=$?
+          
+          # Cleanup
+          kill $PF_PID 2>/dev/null || true
+          exit $TEST_EXIT
+
+      - name: Cleanup
+        if: always()
+        run: |
+          kind delete cluster || true
