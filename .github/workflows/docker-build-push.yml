@@ -110,7 +110,7 @@ jobs:
 
       - name: Start services with Docker Compose
         run: |
-          docker-compose up -d
+          docker compose up -d
           sleep 30
 
       - name: Wait for services to be ready
@@ -137,7 +137,7 @@ jobs:
       - name: Stop services
         if: always()
         run: |
-          docker-compose down -v
+          docker compose down -v
 
   kubernetes-tests:
     runs-on: ubuntu-latest
