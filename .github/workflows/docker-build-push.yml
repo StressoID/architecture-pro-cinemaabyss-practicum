@@ -222,6 +222,32 @@ jobs:
             --selector=app=proxy-service \
             --timeout=300s
 
+      - name: Check pods status before tests
+        run: |
+          echo "Checking pod status before running tests..."
+          kubectl get pods -n cinemaabyss
+          
+          # Verify all critical pods are running
+          FAILED_PODS=0
+          for app in monolith movies-service events-service proxy-service; do
+            POD_STATUS=$(kubectl get pods -n cinemaabyss -l app=$app -o jsonpath='{.items[0].status.phase}' 2>/dev/null || echo "NotFound")
+            if [ "$POD_STATUS" != "Running" ]; then
+              echo "ERROR: Pod for $app is not Running (status: $POD_STATUS)"
+              kubectl describe pod -n cinemaabyss -l app=$app | tail -20
+              FAILED_PODS=$((FAILED_PODS + 1))
+            else
+              echo "✓ Pod for $app is Running"
+            fi
+          done
+          
+          if [ $FAILED_PODS -gt 0 ]; then
+            echo "Some pods failed to start. Showing all pod statuses:"
+            kubectl get pods -n cinemaabyss
+            exit 1
+          fi
+          
+          echo "All pods are ready for testing"
+
       - name: Apply ingress
         run: |
           kubectl apply -f src/kubernetes/ingress.yaml
@@ -251,7 +277,7 @@ jobs:
           PF_PID=$!
           sleep 5
           
-          # Update environment file with localhost URLs
+          # Update environment file with 127.0.0.1 URLs (more reliable than localhost)
           cd tests/postman
           cat > kubernetes.environment.json <<EOF
           {
@@ -260,25 +286,25 @@ jobs:
             "values": [
               {
                 "key": "baseUrl",
-                "value": "http://localhost:8000",
+                "value": "http://127.0.0.1:8000",
                 "type": "default",
                 "enabled": true
               },
               {
                 "key": "moviesServiceUrl",
-                "value": "http://localhost:8000",
+                "value": "http://127.0.0.1:8000",
                 "type": "default",
                 "enabled": true
               },
               {
                 "key": "eventsServiceUrl",
-                "value": "http://localhost:8000",
+                "value": "http://127.0.0.1:8000",
                 "type": "default",
                 "enabled": true
               },
               {
                 "key": "proxyServiceUrl",
-                "value": "http://localhost:8000",
+                "value": "http://127.0.0.1:8000",
                 "type": "default",
                 "enabled": true
               }
@@ -290,7 +316,7 @@ jobs:
           # Wait for services to be healthy
           echo "Waiting for proxy service to be ready..."
           for i in {1..60}; do
-            if curl -f http://localhost:8000/health 2>/dev/null; then
+            if curl -f http://127.0.0.1:8000/health 2>/dev/null; then
               echo "Proxy service is ready"
               break
             fi
@@ -306,6 +332,24 @@ jobs:
           # Run tests
           TEST_EXIT=0
           npm run test:kubernetes || TEST_EXIT=$?
+          
+          # Show test results and pod status if tests failed
+          if [ $TEST_EXIT -ne 0 ]; then
+            echo "Tests failed. Checking pod status and logs..."
+            kubectl get pods -n cinemaabyss
+            echo ""
+            echo "Proxy service logs:"
+            kubectl logs -n cinemaabyss -l app=proxy-service --tail=50
+            echo ""
+            echo "Monolith logs:"
+            kubectl logs -n cinemaabyss -l app=monolith --tail=30
+            echo ""
+            echo "Movies service logs:"
+            kubectl logs -n cinemaabyss -l app=movies-service --tail=30
+            echo ""
+            echo "Events service logs:"
+            kubectl logs -n cinemaabyss -l app=events-service --tail=30
+          fi
           
           # Cleanup
           kill $PF_PID 2>/dev/null || true

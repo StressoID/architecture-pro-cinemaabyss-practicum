@@ -419,10 +419,10 @@ Get-Content $env:USERPROFILE\.docker\config.json | [Convert]::ToBase64String([Sy
   Часть тестов с health-чек упадет, но создание событий отработает.
 
 #### Шаг 3
-Результаты выполнения команд и тестов описаны в файле [kubernetes-test-results.md](kubernetes-test-results.md):
-- Вывод при вызове `https://cinemaabyss.example.com/api/movies`
-- Логи events-service после вызова тестов
 
+![Результат запроса к API movies](tmp/movies_json.png)
+
+![Логи events-service после вызова тестов](tmp/event-service-log.png)
 
 ## Задание 4 ✅
 Для простоты дальнейшего обновления и развертывания вам как архитектору необходимо так же реализовать helm-чарты для прокси-сервиса и проверить работу 
@@ -519,7 +519,8 @@ minikube tunnel
 Потом вызовите 
 https://cinemaabyss.example.com/api/movies
 
-Результаты развертывания helm и вывода API описаны в файле [helm-deployment-results.md](helm-deployment-results.md)
+ЛОГ ВМЕСТО СКРИНШОТА: [helm-deployment.log](helm-deployment.log)
+
 
 
 # Задание 5 ✅
@@ -602,7 +603,8 @@ cluster.outbound|8081||movies-service.cinemaabyss.svc.cluster.local;.upstream_rq
 You can see 21 for the upstream_rq_pending_overflow value which means 21 calls so far have been flagged for circuit breaking.
 ```
 
-Результаты работы circuit breaker описаны в файле [circuit-breaker-results.md](circuit-breaker-results.md)
+![Логи Circuit Breaker из Istio](istio-log.png)
+
 
 Удаляем все
 ```bash
