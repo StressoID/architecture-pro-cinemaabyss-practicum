@@ -77,7 +77,8 @@ jobs:
       - name: Make package public
         run: |
           # Package name format: owner/service-name (matches image path)
-          PACKAGE_NAME="${{ github.repository_owner }}/${{ matrix.service.name }}"
+          # Convert to lowercase to match Docker image naming convention
+          PACKAGE_NAME=$(echo "${{ github.repository_owner }}/${{ matrix.service.name }}" | tr '[:upper:]' '[:lower:]')
           
           echo "Making package $PACKAGE_NAME public"
           RESPONSE=$(curl -s -w "\n%{http_code}" -X PATCH \
