@@ -121,6 +121,8 @@ Thumbs.db
 charts/*/charts/
 charts/*/requirements.lock
 .cache/
+values.local.yaml
+*.local.yaml
 
 # Test coverage
 coverage.txt

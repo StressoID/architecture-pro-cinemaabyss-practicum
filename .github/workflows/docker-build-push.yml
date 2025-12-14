@@ -1,28 +1,40 @@
-name: Docker Build and Push
+name: Build and Push Docker Images
 
 on:
-  workflow_dispatch:
   push:
-    branches: [ main ]
-    paths:
-      - 'src/**'
-      - '.github/workflows/docker-build-push.yml'
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
   release:
     types: [published]
+  workflow_dispatch:
 
 env:
   REGISTRY: ghcr.io
-  MONOLITH_IMAGE_NAME: ${{ github.repository }}/monolith
-  MOVIES_SERVICE_IMAGE_NAME: ${{ github.repository }}/movies-service
-  EVENTS_SERVICE_IMAGE_NAME: ${{ github.repository }}/events-service
-  PROXY_SERVICE_IMAGE_NAME: ${{ github.repository }}/proxy-service
 
 jobs:
   build-and-push:
+    name: Build and Push Docker Images
     runs-on: ubuntu-latest
     permissions:
       contents: read
       packages: write
+
+    strategy:
+      matrix:
+        service:
+          - name: proxy-service
+            context: ./src/microservices/proxy
+            dockerfile: Dockerfile
+          - name: events-service
+            context: ./src/microservices/events
+            dockerfile: Dockerfile
+          - name: movies-service
+            context: ./src/microservices/movies
+            dockerfile: Dockerfile
+          - name: monolith
+            context: ./src/monolith
+            dockerfile: Dockerfile
 
     steps:
       - name: Checkout repository
@@ -36,50 +48,304 @@ jobs:
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
+          password: ${{ secrets.TOKEN }}
 
-      - name: Extract metadata (tags, labels) for Monolith
-        id: meta-monolith
+      - name: Extract metadata (for tags)
+        id: meta
         uses: docker/metadata-action@v4
         with:
-          images: ${{ env.REGISTRY }}/${{ env.MONOLITH_IMAGE_NAME }}
+          images: ${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ matrix.service.name }}
           tags: |
+            type=ref,event=branch
+            type=ref,event=pr
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
-            type=sha,format=short
-            type=ref,event=branch
-            latest
+            type=sha,prefix=,format=long
+            type=raw,value=latest,enable={{is_default_branch}}
 
-      - name: Build and push Monolith Docker image
+      - name: Build and push Docker image
         uses: docker/build-push-action@v4
         with:
-          context: ./src/monolith
+          context: ${{ matrix.service.context }}
+          file: ${{ matrix.service.context }}/${{ matrix.service.dockerfile }}
           push: true
-          tags: ${{ steps.meta-monolith.outputs.tags }}
-          labels: ${{ steps.meta-monolith.outputs.labels }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-      - name: Extract metadata (tags, labels) for Movies Service
-        id: meta-movies
-        uses: docker/metadata-action@v4
-        with:
-          images: ${{ env.REGISTRY }}/${{ env.MOVIES_SERVICE_IMAGE_NAME }}
-          tags: |
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
-            type=sha,format=short
-            type=ref,event=branch
-            latest
+  api-tests:
+    runs-on: ubuntu-latest
+    needs: build-and-push
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
 
-      - name: Build and push Movies Service Docker image
-        uses: docker/build-push-action@v4
-        with:
-          context: ./src/microservices/movies
-          push: true
-          tags: ${{ steps.meta-movies.outputs.tags }}
-          labels: ${{ steps.meta-movies.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v2
 
-      
+      - name: Start services with Docker Compose
+        run: |
+          docker compose up -d
+          sleep 30
+
+      - name: Wait for services to be ready
+        run: |
+          echo "Waiting for proxy service..."
+          timeout 120 bash -c 'until curl -f http://localhost:8000/health; do sleep 2; done'
+          echo "Waiting for monolith service..."
+          timeout 120 bash -c 'until curl -f http://localhost:8080/health; do sleep 2; done'
+          echo "Waiting for movies service..."
+          timeout 120 bash -c 'until curl -f http://localhost:8081/api/movies/health; do sleep 2; done'
+          echo "Waiting for events service..."
+          timeout 120 bash -c 'until curl -f http://localhost:8082/api/events/health; do sleep 2; done'
+          echo "All services are ready!"
+
+      - name: Install Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: '18'
+
+      - name: Install test dependencies
+        run: |
+          cd tests/postman
+          npm install
+
+      - name: Run API tests
+        run: |
+          cd tests/postman
+          npm run test:local
+
+      - name: Stop services
+        if: always()
+        run: |
+          docker compose down -v
+
+  kubernetes-tests:
+    runs-on: ubuntu-latest
+    needs: build-and-push
+    if: github.ref == 'refs/heads/main'
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      - name: Set up kubectl
+        uses: azure/setup-kubectl@v3
+        with:
+          version: 'latest'
+
+      - name: Set up kind
+        uses: helm/kind-action@v1.8.0
+        with:
+          version: 'v0.20.0'
+
+      - name: Create kind cluster
+        run: |
+          kind create cluster --wait 5m
+
+      - name: Install ingress-nginx
+        run: |
+          kubectl apply -f https://raw.githubusercontent.com/kubernetes/ingress-nginx/main/deploy/static/provider/kind/deploy.yaml
+          kubectl wait --namespace ingress-nginx \
+            --for=condition=ready pod \
+            --selector=app.kubernetes.io/component=controller \
+            --timeout=300s
+
+      - name: Create namespace
+        run: |
+          kubectl apply -f src/kubernetes/namespace.yaml
+
+      - name: Create docker-registry secret for ghcr.io
+        run: |
+          kubectl create secret docker-registry ghcr-secret \
+            --docker-server=ghcr.io \
+            --docker-username=${{ github.actor }} \
+            --docker-password=${{ secrets.TOKEN }} \
+            --namespace=cinemaabyss \
+            --dry-run=client -o yaml | kubectl apply -f -
+
+      - name: Apply configmaps and secrets
+        run: |
+          kubectl apply -f src/kubernetes/configmap.yaml
+          kubectl apply -f src/kubernetes/secret.yaml
+          kubectl apply -f src/kubernetes/postgres-init-configmap.yaml
+
+      - name: Deploy PostgreSQL
+        run: |
+          kubectl apply -f src/kubernetes/postgres.yaml
+          kubectl wait --namespace cinemaabyss \
+            --for=condition=ready pod \
+            --selector=app=postgres \
+            --timeout=300s
+
+      - name: Deploy Kafka
+        run: |
+          kubectl apply -f src/kubernetes/kafka/kafka.yaml
+          kubectl wait --namespace cinemaabyss \
+            --for=condition=ready pod \
+            --selector=app=kafka \
+            --timeout=300s
+
+      - name: Deploy services
+        run: |
+          kubectl apply -f src/kubernetes/monolith.yaml
+          kubectl apply -f src/kubernetes/movies-service.yaml
+          kubectl apply -f src/kubernetes/events-service.yaml
+          kubectl apply -f src/kubernetes/proxy-service.yaml
+
+      - name: Wait for services to be ready
+        run: |
+          kubectl wait --namespace cinemaabyss \
+            --for=condition=ready pod \
+            --selector=app=monolith \
+            --timeout=300s
+          kubectl wait --namespace cinemaabyss \
+            --for=condition=ready pod \
+            --selector=app=movies-service \
+            --timeout=300s
+          kubectl wait --namespace cinemaabyss \
+            --for=condition=ready pod \
+            --selector=app=events-service \
+            --timeout=300s
+          kubectl wait --namespace cinemaabyss \
+            --for=condition=ready pod \
+            --selector=app=proxy-service \
+            --timeout=300s
+
+      - name: Check pods status before tests
+        run: |
+          echo "Checking pod status before running tests..."
+          kubectl get pods -n cinemaabyss
+          
+          # Verify all critical pods are running
+          FAILED_PODS=0
+          for app in monolith movies-service events-service proxy-service; do
+            POD_STATUS=$(kubectl get pods -n cinemaabyss -l app=$app -o jsonpath='{.items[0].status.phase}' 2>/dev/null || echo "NotFound")
+            if [ "$POD_STATUS" != "Running" ]; then
+              echo "ERROR: Pod for $app is not Running (status: $POD_STATUS)"
+              kubectl describe pod -n cinemaabyss -l app=$app | tail -20
+              FAILED_PODS=$((FAILED_PODS + 1))
+            else
+              echo "✓ Pod for $app is Running"
+            fi
+          done
+          
+          if [ $FAILED_PODS -gt 0 ]; then
+            echo "Some pods failed to start. Showing all pod statuses:"
+            kubectl get pods -n cinemaabyss
+            exit 1
+          fi
+          
+          echo "All pods are ready for testing"
+
+      - name: Apply ingress
+        run: |
+          kubectl apply -f src/kubernetes/ingress.yaml
+
+      - name: Wait for ingress to be ready
+        run: |
+          sleep 10
+          kubectl wait --namespace ingress-nginx \
+            --for=condition=ready pod \
+            --selector=app.kubernetes.io/component=controller \
+            --timeout=300s
+
+      - name: Install Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: '18'
+
+      - name: Install test dependencies
+        run: |
+          cd tests/postman
+          npm install
+
+      - name: Setup port-forward and run tests
+        run: |
+          # Start port-forward in background
+          kubectl port-forward -n cinemaabyss service/proxy-service 8000:80 &
+          PF_PID=$!
+          sleep 5
+          
+          # Update environment file with 127.0.0.1 URLs (more reliable than localhost)
+          cd tests/postman
+          cat > kubernetes.environment.json <<EOF
+          {
+            "id": "kubernetes-env",
+            "name": "Kubernetes Environment",
+            "values": [
+              {
+                "key": "baseUrl",
+                "value": "http://127.0.0.1:8000",
+                "type": "default",
+                "enabled": true
+              },
+              {
+                "key": "moviesServiceUrl",
+                "value": "http://127.0.0.1:8000",
+                "type": "default",
+                "enabled": true
+              },
+              {
+                "key": "eventsServiceUrl",
+                "value": "http://127.0.0.1:8000",
+                "type": "default",
+                "enabled": true
+              },
+              {
+                "key": "proxyServiceUrl",
+                "value": "http://127.0.0.1:8000",
+                "type": "default",
+                "enabled": true
+              }
+            ],
+            "_postman_variable_scope": "environment"
+          }
+          EOF
+          
+          # Wait for services to be healthy
+          echo "Waiting for proxy service to be ready..."
+          for i in {1..60}; do
+            if curl -f http://127.0.0.1:8000/health 2>/dev/null; then
+              echo "Proxy service is ready"
+              break
+            fi
+            if [ $i -eq 60 ]; then
+              echo "Proxy service failed to become ready"
+              kubectl get pods -n cinemaabyss
+              kubectl logs -n cinemaabyss -l app=proxy-service --tail=50
+              exit 1
+            fi
+            sleep 2
+          done
+          
+          # Run tests
+          TEST_EXIT=0
+          npm run test:kubernetes || TEST_EXIT=$?
+          
+          # Show test results and pod status if tests failed
+          if [ $TEST_EXIT -ne 0 ]; then
+            echo "Tests failed. Checking pod status and logs..."
+            kubectl get pods -n cinemaabyss
+            echo ""
+            echo "Proxy service logs:"
+            kubectl logs -n cinemaabyss -l app=proxy-service --tail=50
+            echo ""
+            echo "Monolith logs:"
+            kubectl logs -n cinemaabyss -l app=monolith --tail=30
+            echo ""
+            echo "Movies service logs:"
+            kubectl logs -n cinemaabyss -l app=movies-service --tail=30
+            echo ""
+            echo "Events service logs:"
+            kubectl logs -n cinemaabyss -l app=events-service --tail=30
+          fi
+          
+          # Cleanup
+          kill $PF_PID 2>/dev/null || true
+          exit $TEST_EXIT
+
+      - name: Cleanup
+        if: always()
+        run: |
+          kind delete cluster || true

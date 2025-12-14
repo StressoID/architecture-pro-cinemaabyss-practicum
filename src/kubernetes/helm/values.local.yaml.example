@@ -1,0 +1,13 @@
+# Local development values
+# Copy this file to values.local.yaml and fill in your credentials
+# values.local.yaml is gitignored and will not be committed
+
+# Image pull secrets for local development
+# Set this to ["ghcr-secret"] when using private images from GitHub Container Registry
+# Make sure to create the secret first:
+# kubectl create secret docker-registry ghcr-secret \
+#   --docker-server=ghcr.io \
+#   --docker-username=YOUR_USERNAME \
+#   --docker-password=YOUR_TOKEN \
+#   --namespace=cinemaabyss
+imagePullSecrets: []
