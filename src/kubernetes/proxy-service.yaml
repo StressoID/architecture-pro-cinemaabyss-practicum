@@ -22,7 +22,7 @@ spec:
     spec:
       containers:
       - name: proxy-service
-        image: ghcr.io/stressoid/architecture-pro-cinemaabyss-practicum/proxy-service:latest
+        image: ghcr.io/stressoid/proxy-service:latest
         imagePullPolicy: Always
         ports:
         - containerPort: 8000
@@ -55,8 +55,6 @@ spec:
           initialDelaySeconds: 15
           periodSeconds: 20
       restartPolicy: Always
-      imagePullSecrets:
-        - name: dockerconfigjson
 ---
 apiVersion: v1
 kind: Service

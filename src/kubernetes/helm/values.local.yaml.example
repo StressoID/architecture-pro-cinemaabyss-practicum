@@ -1,0 +1,12 @@
+# Local development values
+# Copy this file to values.local.yaml and fill in your credentials
+# values.local.yaml is gitignored and will not be committed
+
+# Image pull secrets for local development
+imagePullSecrets:
+  dockerconfigjson: ""  # Replace with your base64 encoded docker config
+  # To generate:
+  # GITHUB_USERNAME="your-username"
+  # GITHUB_TOKEN="ghp_your_token"
+  # AUTH_STRING=$(echo -n "$GITHUB_USERNAME:$GITHUB_TOKEN" | base64)
+  # echo "{\"auths\":{\"ghcr.io\":{\"auth\":\"$AUTH_STRING\"}}}" | base64 | tr -d '\n'

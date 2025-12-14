@@ -22,7 +22,7 @@ spec:
     spec:
       containers:
       - name: monolith
-        image: ghcr.io/stressoid/architecture-pro-cinemaabyss-practicum/monolith:latest
+        image: ghcr.io/stressoid/monolith:latest
         imagePullPolicy: Always
         ports:
         - containerPort: 8080
@@ -56,8 +56,6 @@ spec:
           initialDelaySeconds: 15
           periodSeconds: 20
       restartPolicy: Always
-      imagePullSecrets:
-        - name: dockerconfigjson
 ---
 apiVersion: v1
 kind: Service

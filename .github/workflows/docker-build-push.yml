@@ -48,7 +48,7 @@ jobs:
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
+          password: ${{ secrets.TOKEN }}
 
       - name: Extract metadata (for tags)
         id: meta
@@ -76,27 +76,24 @@ jobs:
 
       - name: Make package public
         run: |
-          # Try different package name formats
-          PACKAGE_NAME1="${{ matrix.service.name }}"
-          PACKAGE_NAME2="${{ github.repository_owner }}/${{ matrix.service.name }}"
-          PACKAGE_NAME3="${{ github.repository_owner }}/${{ github.event.repository.name }}/${{ matrix.service.name }}"
+          # Package name format: owner/service-name (matches image path)
+          PACKAGE_NAME="${{ github.repository_owner }}/${{ matrix.service.name }}"
           
-          for PACKAGE_NAME in "$PACKAGE_NAME1" "$PACKAGE_NAME2" "$PACKAGE_NAME3"; do
-            echo "Trying to make package $PACKAGE_NAME public"
-            RESPONSE=$(curl -s -w "\n%{http_code}" -X PATCH \
-              -H "Accept: application/vnd.github+json" \
-              -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
-              -H "X-GitHub-Api-Version: 2022-11-28" \
-              https://api.github.com/user/packages/container/$PACKAGE_NAME \
-              -d '{"visibility":"public"}')
-            HTTP_CODE=$(echo "$RESPONSE" | tail -n1)
-            if [ "$HTTP_CODE" = "204" ] || [ "$HTTP_CODE" = "200" ]; then
-              echo "Successfully made package $PACKAGE_NAME public"
-              break
-            else
-              echo "Failed with HTTP code $HTTP_CODE for $PACKAGE_NAME"
-            fi
-          done
+          echo "Making package $PACKAGE_NAME public"
+          RESPONSE=$(curl -s -w "\n%{http_code}" -X PATCH \
+            -H "Accept: application/vnd.github+json" \
+            -H "Authorization: Bearer ${{ secrets.TOKEN }}" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            "https://api.github.com/user/packages/container/$PACKAGE_NAME" \
+            -d '{"visibility":"public"}')
+          HTTP_CODE=$(echo "$RESPONSE" | tail -n1)
+          if [ "$HTTP_CODE" = "204" ] || [ "$HTTP_CODE" = "200" ]; then
+            echo "Successfully made package $PACKAGE_NAME public"
+          else
+            echo "Warning: Failed to make package $PACKAGE_NAME public (HTTP $HTTP_CODE)"
+            echo "Response: $(echo "$RESPONSE" | head -n -1)"
+            # Don't fail the build if making public fails - images might already be public
+          fi
 
   api-tests:
     runs-on: ubuntu-latest

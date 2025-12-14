@@ -22,7 +22,7 @@ spec:
     spec:
       containers:
       - name: events-service
-        image: ghcr.io/stressoid/architecture-pro-cinemaabyss-practicum/events-service:latest
+        image: ghcr.io/stressoid/events-service:latest
         imagePullPolicy: Always
         ports:
         - containerPort: 8082
@@ -51,8 +51,6 @@ spec:
           initialDelaySeconds: 20
           periodSeconds: 20
       restartPolicy: Always
-      imagePullSecrets:
-        - name: dockerconfigjson
 ---
 apiVersion: v1
 kind: Service
