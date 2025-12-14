@@ -420,9 +420,9 @@ Get-Content $env:USERPROFILE\.docker\config.json | [Convert]::ToBase64String([Sy
 
 #### Шаг 3
 
-![Результат запроса к API movies](tmp/movies_json.png)
+![Результат запроса к API movies](images/movies_json.png)
 
-![Логи events-service после вызова тестов](tmp/event-service-log.png)
+![Логи events-service после вызова тестов](images/event-service-log.png)
 
 ## Задание 4 ✅
 Для простоты дальнейшего обновления и развертывания вам как архитектору необходимо так же реализовать helm-чарты для прокси-сервиса и проверить работу 
@@ -603,7 +603,7 @@ cluster.outbound|8081||movies-service.cinemaabyss.svc.cluster.local;.upstream_rq
 You can see 21 for the upstream_rq_pending_overflow value which means 21 calls so far have been flagged for circuit breaking.
 ```
 
-![Логи Circuit Breaker из Istio](istio-log.png)
+![Логи Circuit Breaker из Istio](images/istio-log.png)
 
 
 Удаляем все
