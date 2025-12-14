@@ -23,6 +23,12 @@ spec:
       labels:
         app: events-service
     spec:
+      {{- if .Values.imagePullSecrets }}
+      imagePullSecrets:
+      {{- range .Values.imagePullSecrets }}
+      - name: {{ . }}
+      {{- end }}
+      {{- end }}
       containers:
       - name: events-service
         image: {{ .Values.eventsService.image.repository }}:{{ .Values.eventsService.image.tag }}

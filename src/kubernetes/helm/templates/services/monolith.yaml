@@ -23,6 +23,12 @@ spec:
       labels:
         app: monolith
     spec:
+      {{- if .Values.imagePullSecrets }}
+      imagePullSecrets:
+      {{- range .Values.imagePullSecrets }}
+      - name: {{ . }}
+      {{- end }}
+      {{- end }}
       containers:
       - name: monolith
         image: {{ .Values.monolith.image.repository }}:{{ .Values.monolith.image.tag }}

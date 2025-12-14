@@ -3,10 +3,11 @@
 # values.local.yaml is gitignored and will not be committed
 
 # Image pull secrets for local development
-imagePullSecrets:
-  dockerconfigjson: ""  # Replace with your base64 encoded docker config
-  # To generate:
-  # GITHUB_USERNAME="your-username"
-  # GITHUB_TOKEN="ghp_your_token"
-  # AUTH_STRING=$(echo -n "$GITHUB_USERNAME:$GITHUB_TOKEN" | base64)
-  # echo "{\"auths\":{\"ghcr.io\":{\"auth\":\"$AUTH_STRING\"}}}" | base64 | tr -d '\n'
+# Set this to ["ghcr-secret"] when using private images from GitHub Container Registry
+# Make sure to create the secret first:
+# kubectl create secret docker-registry ghcr-secret \
+#   --docker-server=ghcr.io \
+#   --docker-username=YOUR_USERNAME \
+#   --docker-password=YOUR_TOKEN \
+#   --namespace=cinemaabyss
+imagePullSecrets: []

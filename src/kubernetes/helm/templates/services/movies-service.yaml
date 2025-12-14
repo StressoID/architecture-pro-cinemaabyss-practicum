@@ -23,6 +23,12 @@ spec:
       labels:
         app: movies-service
     spec:
+      {{- if .Values.imagePullSecrets }}
+      imagePullSecrets:
+      {{- range .Values.imagePullSecrets }}
+      - name: {{ . }}
+      {{- end }}
+      {{- end }}
       containers:
       - name: movies-service
         image: {{ .Values.moviesService.image.repository }}:{{ .Values.moviesService.image.tag }}

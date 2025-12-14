@@ -2,6 +2,8 @@
 global:
   namespace: cinemaabyss
   domain: cinemaabyss.example.com
+
+imagePullSecrets: ["ghcr-secret"]
 # Database configuration
 database:
   host: postgres
