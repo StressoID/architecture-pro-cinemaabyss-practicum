@@ -20,6 +20,8 @@ spec:
       labels:
         app: proxy-service
     spec:
+      imagePullSecrets:
+      - name: ghcr-secret
       containers:
       - name: proxy-service
         image: ghcr.io/stressoid/proxy-service:latest

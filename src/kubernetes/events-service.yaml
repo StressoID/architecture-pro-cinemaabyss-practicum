@@ -20,6 +20,8 @@ spec:
       labels:
         app: events-service
     spec:
+      imagePullSecrets:
+      - name: ghcr-secret
       containers:
       - name: events-service
         image: ghcr.io/stressoid/events-service:latest

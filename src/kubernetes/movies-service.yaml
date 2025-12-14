@@ -20,6 +20,8 @@ spec:
       labels:
         app: movies-service
     spec:
+      imagePullSecrets:
+      - name: ghcr-secret
       containers:
       - name: movies-service
         image: ghcr.io/stressoid/movies-service:latest

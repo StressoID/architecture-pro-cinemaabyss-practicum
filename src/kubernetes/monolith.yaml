@@ -20,6 +20,8 @@ spec:
       labels:
         app: monolith
     spec:
+      imagePullSecrets:
+      - name: ghcr-secret
       containers:
       - name: monolith
         image: ghcr.io/stressoid/monolith:latest

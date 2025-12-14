@@ -74,19 +74,6 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-      - name: Make package public
-        run: |
-          if [ "${{ github.repository_owner_type }}" = "Organization" ]; then
-            API_PATH="/orgs/${{ github.repository_owner }}/packages/container/${{ matrix.service.name }}/visibility"
-          else
-            API_PATH="/user/packages/container/${{ matrix.service.name }}/visibility"
-          fi
-          curl -X PATCH \
-            -H "Authorization: token ${{ secrets.TOKEN }}" \
-            -H "Accept: application/vnd.github.v3+json" \
-            https://api.github.com${API_PATH} \
-            -d '{"visibility":"public"}'
-
   api-tests:
     runs-on: ubuntu-latest
     needs: build-and-push
@@ -168,11 +155,19 @@ jobs:
         run: |
           kubectl apply -f src/kubernetes/namespace.yaml
 
+      - name: Create docker-registry secret for ghcr.io
+        run: |
+          kubectl create secret docker-registry ghcr-secret \
+            --docker-server=ghcr.io \
+            --docker-username=${{ github.actor }} \
+            --docker-password=${{ secrets.TOKEN }} \
+            --namespace=cinemaabyss \
+            --dry-run=client -o yaml | kubectl apply -f -
+
       - name: Apply configmaps and secrets
         run: |
           kubectl apply -f src/kubernetes/configmap.yaml
           kubectl apply -f src/kubernetes/secret.yaml
-          # Remove imagePullSecrets from deployments since images are now public
           kubectl apply -f src/kubernetes/postgres-init-configmap.yaml
 
       - name: Deploy PostgreSQL
